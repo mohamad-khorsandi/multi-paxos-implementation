@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "org.example";
+
+service LearnerService {
+  rpc InternalLearn(InternalLearnRequest) returns (LearnResponse) {}
+  rpc Learn(ExternalLearnRequest) returns (LearnResponse) {}
+}
+
+message InternalLearnRequest {
+  int32 accepted_number = 2;
+  string accepted_value = 3;
+}
+
+message ExternalLearnRequest {
+
+}
+
+message LearnResponse {
+  enum Status {
+    OK = 0;
+    REJECT = 1;
+  }
+
+  Status status = 1;
+}

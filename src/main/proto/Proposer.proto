@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "org.example";
+
+service ProposerService {
+  rpc Propose(ProposeRequest) returns (ProposeResponse) {}
+}
+
+message ProposeRequest {
+  string proposal_value = 1;
+}
+
+message ProposeResponse {
+  enum Status {
+    OK = 0;
+    REJECT = 1;
+  }
+
+  Status status = 1;
+  string accepted_value = 2;
+}
