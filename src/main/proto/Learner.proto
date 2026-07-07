@@ -9,7 +9,7 @@ service LearnerService {
 }
 
 message InternalLearnRequest {
-  int32 accepted_number = 2;
+  int32 accepted_proposal_number = 2;
   string accepted_value = 3;
 }
 
@@ -19,9 +19,10 @@ message ExternalLearnRequest {
 
 message LearnResponse {
   enum Status {
-    OK = 0;
-    REJECT = 1;
+    DONT_KNOW = 0;
+    CHOSEN = 1;
   }
 
   Status status = 1;
+  string accepted_value = 2;
 }

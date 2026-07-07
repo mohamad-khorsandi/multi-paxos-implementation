@@ -13,10 +13,8 @@ message ProposeRequest {
 
 message ProposeResponse {
   enum Status {
-    OK = 0;
-    REJECT = 1;
+    SUCCESS = 0;
+    FAIL = 1;
   }
-
   Status status = 1;
-  string accepted_value = 2;
 }

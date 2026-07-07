@@ -5,6 +5,7 @@ import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.stub.StreamObserver;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -13,23 +14,19 @@ import static org.example.AcceptorServiceGrpc.newBlockingStub;
 
 
 class ProposerAgent extends ProposerServiceGrpc.ProposerServiceImplBase{
-    public ProposerAgent(int nextProposalNumber, List<Integer> peerPortNumbers) {
-        this.nextProposalNumber = nextProposalNumber;
-        stubs = new ArrayList<>();
-        for (int port : peerPortNumbers) {
-            ManagedChannel channel = ManagedChannelBuilder.forAddress("127.0.0.1", port).usePlaintext().build();
-            stubs.add(newBlockingStub(channel));
-        }
+    public ProposerAgent(int initialProposalNumber, List<AcceptorServiceGrpc.AcceptorServiceBlockingStub> acceptorStubs) {
+        this.nextProposalNumber = initialProposalNumber;
+        this.stubs = acceptorStubs;
     }
 
     private int nextProposalNumber;
-    final private ArrayList<AcceptorServiceGrpc.AcceptorServiceBlockingStub> stubs;
+    private final List<AcceptorServiceGrpc.AcceptorServiceBlockingStub> stubs;
 
     @Override
     public void propose(ProposeRequest request, StreamObserver<ProposeResponse> responseObserver) {
         int proposalNumber = nextProposalNumber;
         nextProposalNumber = nextProposalNumber + 3;
-        String proposalValue = request.getProposalValue();
+        String proposeValue = request.getProposalValue();
 
         PromiseRequest promiseRequest = PromiseRequest.newBuilder()
                 .setProposalNumber(proposalNumber)
@@ -38,51 +35,58 @@ class ProposerAgent extends ProposerServiceGrpc.ProposerServiceImplBase{
         int acceptedCount = 0;
         int maxReceivedProposalNumber = 0;
         String valueOfMaxReceivedProposalNumber = "";
-        System.out.println("PROPOSER_AGENT: im proposing \"" + proposalValue + "\" with proposal number: " + proposalNumber);
+        System.out.println("PROPOSER_AGENT: im proposing with proposal number: " + proposalNumber);
         for (AcceptorServiceGrpc.AcceptorServiceBlockingStub stub : stubs) {
 
-            PromiseResponse res = stub.promise(promiseRequest);
-            if (res.getStatus().equals(PromiseResponse.Status.OK)) {
-                acceptedCount++;
-                if (res.getAcceptedProposalNumber() > 0) {
-                    if (res.getAcceptedProposalNumber() > maxReceivedProposalNumber) {
-                        maxReceivedProposalNumber = res.getAcceptedProposalNumber();
-                        valueOfMaxReceivedProposalNumber = res.getAcceptedValue();
+            try {
+                PromiseResponse res = stub.promise(promiseRequest);
+                if (res.getStatus().equals(PromiseResponse.Status.OK)) {
+                    acceptedCount++;
+                    if (res.getAcceptedProposalNumber() > 0) {
+                        if (res.getAcceptedProposalNumber() > maxReceivedProposalNumber) {
+                            maxReceivedProposalNumber = res.getAcceptedProposalNumber();
+                            valueOfMaxReceivedProposalNumber = res.getAcceptedValue();
+                        }
                     }
                 }
+            } catch (Exception io) {
+                System.out.println("PROPOSER_AGENT: some peer seems to be down(could not send PROMISE)");
             }
+
         }
 
-        ProposeResponse proposeResponse;
-
+        ProposeResponse.Status consensusStatus = ProposeResponse.Status.FAIL;
         if (acceptedCount > 1) {
             System.out.println("PROPOSER_AGENT: majority accepted my proposal");
-            AcceptRequest acceptRequest;
-            String finalProposeValue;
-            ProposeResponse.Status finalStatus = ProposeResponse.Status.OK;
 
-            if (maxReceivedProposalNumber > 0) {
-                finalProposeValue = valueOfMaxReceivedProposalNumber;
-                finalStatus = ProposeResponse.Status.REJECT;
-                System.out.println("PROPOSER_AGENT: but seems like consensus has already been reached on \"" + valueOfMaxReceivedProposalNumber + "\" so let's stick with that.");
+            if (maxReceivedProposalNumber == 0) {
+                consensusStatus = ProposeResponse.Status.SUCCESS;
+            } else {
+                proposeValue = valueOfMaxReceivedProposalNumber;
+                System.out.println("PROPOSER_AGENT: but seems like consensus has already been reached on \"" + proposeValue + "\" so let's stick with that.");
             }
-            else {
-                finalProposeValue = proposalValue;
-            }
-            acceptRequest = AcceptRequest.newBuilder()
+
+            AcceptRequest acceptRequest = AcceptRequest.newBuilder()
                     .setProposalNumber(proposalNumber)
-                    .setProposalValue(finalProposeValue)
-                    .build();
+                    .setProposalValue(proposeValue).build();
 
-            for (AcceptorServiceGrpc.AcceptorServiceBlockingStub stub : stubs)
-                stub.accept(acceptRequest);
+            System.out.println("PROPOSER_AGENT: Im requesting others to accept \"" + proposeValue + "\" with proposal number of: " + proposalNumber);
+            for (AcceptorServiceGrpc.AcceptorServiceBlockingStub stub : stubs) {
+                try {
+                    stub.accept(acceptRequest);
+                } catch (Exception e) {
+                    System.out.println("PROPOSER_AGENT: some peer seems to be down(could not send ACCEPT)");
+                }
 
-            proposeResponse = ProposeResponse.newBuilder().setStatus(finalStatus).setAcceptedValue(finalProposeValue).build();
-        } else {
-            proposeResponse = ProposeResponse.newBuilder().setStatus(ProposeResponse.Status.REJECT).setAcceptedValue("").build();
-        }
+            }
+        } else
+            System.out.println("PROPOSER_AGENT: majority DIDN'T accepted my proposal");
 
-        responseObserver.onNext(proposeResponse);
+
+        responseObserver.onNext(ProposeResponse.newBuilder().setStatus(consensusStatus).build());
         responseObserver.onCompleted();
     }
+
 }
+
+
