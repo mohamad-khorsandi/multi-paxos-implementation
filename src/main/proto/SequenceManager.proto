@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "org.example";
+
+service SequenceManagerService {
+  rpc AddCommand (AddCmdRequest) returns (AddCmdResponse) {}
+  rpc ListCommand (ListCmdRequest) returns (ListCmdResponse) {}
+}
+
+message AddCmdRequest {
+  string value = 1;
+}
+
+message AddCmdResponse {
+  enum Status {
+    SUCCESS = 0;
+    FAIL = 1;
+  }
+  Status status = 1;
+  int32 commandNumber = 2;
+}
+
+message ListCmdRequest {
+
+}
+
+message ListCmdResponse {
+  repeated string commands = 1;
+}

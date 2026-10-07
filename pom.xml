@@ -24,7 +24,7 @@
                 <configuration>
                     <archive>
                         <manifest>
-                            <mainClass>org.example.Main</mainClass>
+                            <mainClass>org.example.ServerMain</mainClass>
                         </manifest>
                     </archive>
                 </configuration>
@@ -56,25 +56,19 @@
 
                 <executions>
                     <execution>
+                        <id>server</id>
                         <phase>package</phase>
                         <goals>
                             <goal>shade</goal>
                         </goals>
-
                         <configuration>
-
                             <transformers>
-
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
-
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>org.example.Main</mainClass>
+                                    <mainClass>org.example.ClientMain</mainClass>
                                 </transformer>
-
                             </transformers>
-
                         </configuration>
-
                     </execution>
                 </executions>
             </plugin>

@@ -11,6 +11,7 @@ service AcceptorService {
 
 message PromiseRequest {
   int32 proposal_number = 1;
+  int32 sequence_number = 2;
 }
 
 message PromiseResponse {
@@ -27,6 +28,7 @@ message PromiseResponse {
 message AcceptRequest {
   int32 proposal_number = 1;
   string proposal_value = 2;
+  int32 sequence_number = 3;
 }
 
 message AcceptResponse {
@@ -42,12 +44,9 @@ message InformRequest {
 }
 
 message InformResponse {
-  enum Status {
-    DONE = 0;
-    INCOMPLETE = 1;
+  message Pair {
+    int32 sequence_number = 1;
+    string accepted_value = 2;
   }
-
-  Status status = 1;
-  int32 accepted_proposal_number = 2;
-  string accepted_value = 3;
+  repeated Pair acceptedValues = 1;
 }

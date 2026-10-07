@@ -1,20 +1,11 @@
 package org.example;
 
-import io.grpc.Internal;
-import io.grpc.ManagedChannel;
-import io.grpc.ManagedChannelBuilder;
-import io.grpc.stub.StreamObserver;
-
-import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
-import static org.example.AcceptorServiceGrpc.newBlockingStub;
 
-
-class ProposerAgent extends ProposerServiceGrpc.ProposerServiceImplBase{
-    public ProposerAgent(int initialProposalNumber, List<AcceptorServiceGrpc.AcceptorServiceBlockingStub> acceptorStubs) {
+class ProposerAgent{
+    public ProposerAgent(ArrayList<AcceptorServiceGrpc.AcceptorServiceBlockingStub> acceptorStubs, int initialProposalNumber) {
         this.nextProposalNumber = initialProposalNumber;
         this.stubs = acceptorStubs;
     }
@@ -22,20 +13,46 @@ class ProposerAgent extends ProposerServiceGrpc.ProposerServiceImplBase{
     private int nextProposalNumber;
     private final List<AcceptorServiceGrpc.AcceptorServiceBlockingStub> stubs;
 
-    @Override
-    public void propose(ProposeRequest request, StreamObserver<ProposeResponse> responseObserver) {
+
+    public boolean propose(String proposeValue, int sequenceNumber) {
         int proposalNumber = nextProposalNumber;
         nextProposalNumber = nextProposalNumber + 3;
-        String proposeValue = request.getProposalValue();
+        boolean acceptanceStatus = false;
 
+        PreparePhaseOutcome preparePhaseOutcome = PreparePhase(proposalNumber, sequenceNumber);
+
+        if (! preparePhaseOutcome.majorityPrepare)
+            System.out.println("PROPOSER_AGENT: majority DIDN'T accepted me in prepare phase");
+        else {
+            System.out.println("PROPOSER_AGENT: majority accepted me in prepare phase for sequence number " + sequenceNumber);
+
+            boolean alreadyAccepted = false;
+            if (preparePhaseOutcome.maxReceivedProposalNumber > 0) {
+                System.out.println("PROPOSER_AGENT: but seems like consensus has already been reached on \"" + proposeValue + "\" so let's stick with that.");
+                proposeValue = preparePhaseOutcome.valueOfMaxReceivedProposalNumber;
+                alreadyAccepted = true;
+            }
+
+            boolean majorityAcceptance = AcceptPhase(proposeValue, proposalNumber, sequenceNumber);
+            if (! alreadyAccepted && majorityAcceptance)
+                acceptanceStatus = true;
+        }
+
+        return acceptanceStatus;
+    }
+
+
+    PreparePhaseOutcome PreparePhase(int proposalNumber, int sequenceNumber) {
         PromiseRequest promiseRequest = PromiseRequest.newBuilder()
                 .setProposalNumber(proposalNumber)
+                .setSequenceNumber(sequenceNumber)
                 .build();
 
         int acceptedCount = 0;
         int maxReceivedProposalNumber = 0;
         String valueOfMaxReceivedProposalNumber = "";
-        System.out.println("PROPOSER_AGENT: im proposing with proposal number: " + proposalNumber);
+        System.out.println("PROPOSER_AGENT: Im proposing with proposal number " + proposalNumber + " for sequence number " + sequenceNumber);
+
         for (AcceptorServiceGrpc.AcceptorServiceBlockingStub stub : stubs) {
 
             try {
@@ -49,44 +66,47 @@ class ProposerAgent extends ProposerServiceGrpc.ProposerServiceImplBase{
                         }
                     }
                 }
-            } catch (Exception io) {
-                System.out.println("PROPOSER_AGENT: some peer seems to be down(could not send PROMISE)");
+            } catch (Exception e) {
+                System.out.println("PROPOSER_AGENT: " + stub.getChannel().authority() + " is down, could not send PROMISE (" + e.getMessage() + ")");
             }
+        }
+        return new PreparePhaseOutcome(acceptedCount > 1, maxReceivedProposalNumber, valueOfMaxReceivedProposalNumber);
+    }
 
+
+    boolean AcceptPhase(String proposeValue, int proposeNumber, int sequenceNumber) {
+        AcceptRequest acceptRequest = AcceptRequest.newBuilder()
+                .setProposalNumber(proposeNumber)
+                .setProposalValue(proposeValue)
+                .setSequenceNumber(sequenceNumber).build();
+
+        System.out.println("PROPOSER_AGENT: Im requesting others to accept \"" + proposeValue + "\" with proposal number of " + proposeNumber + " for sequence number of " + sequenceNumber);
+        int acceptedCount = 0;
+        for (AcceptorServiceGrpc.AcceptorServiceBlockingStub stub : stubs) {
+            try {
+                AcceptResponse acceptResponse = stub.accept(acceptRequest);
+                if (acceptResponse.getStatus().equals(AcceptResponse.Status.OK)) acceptedCount++;
+
+            } catch (Exception e) {
+                System.out.println("PROPOSER_AGENT: " + stub.getChannel().authority() + " seems to be down(could not send ACCEPT)");
+            }
         }
 
-        ProposeResponse.Status consensusStatus = ProposeResponse.Status.FAIL;
-        if (acceptedCount > 1) {
-            System.out.println("PROPOSER_AGENT: majority accepted my proposal");
-
-            if (maxReceivedProposalNumber == 0) {
-                consensusStatus = ProposeResponse.Status.SUCCESS;
-            } else {
-                proposeValue = valueOfMaxReceivedProposalNumber;
-                System.out.println("PROPOSER_AGENT: but seems like consensus has already been reached on \"" + proposeValue + "\" so let's stick with that.");
-            }
-
-            AcceptRequest acceptRequest = AcceptRequest.newBuilder()
-                    .setProposalNumber(proposalNumber)
-                    .setProposalValue(proposeValue).build();
-
-            System.out.println("PROPOSER_AGENT: Im requesting others to accept \"" + proposeValue + "\" with proposal number of: " + proposalNumber);
-            for (AcceptorServiceGrpc.AcceptorServiceBlockingStub stub : stubs) {
-                try {
-                    stub.accept(acceptRequest);
-                } catch (Exception e) {
-                    System.out.println("PROPOSER_AGENT: some peer seems to be down(could not send ACCEPT)");
-                }
-
-            }
-        } else
-            System.out.println("PROPOSER_AGENT: majority DIDN'T accepted my proposal");
-
-
-        responseObserver.onNext(ProposeResponse.newBuilder().setStatus(consensusStatus).build());
-        responseObserver.onCompleted();
+        return acceptedCount > 1;
     }
 
 }
 
+
+class PreparePhaseOutcome {
+    public PreparePhaseOutcome(boolean majorityPrepare, int maxReceivedProposalNumber, String valueOfMaxReceivedProposalNumber) {
+        this.majorityPrepare = majorityPrepare;
+        this.maxReceivedProposalNumber = maxReceivedProposalNumber;
+        this.valueOfMaxReceivedProposalNumber = valueOfMaxReceivedProposalNumber;
+    }
+
+    boolean majorityPrepare;
+    int maxReceivedProposalNumber;
+    String valueOfMaxReceivedProposalNumber;
+}
 

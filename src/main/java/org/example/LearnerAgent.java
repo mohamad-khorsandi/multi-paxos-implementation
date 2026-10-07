@@ -1,8 +1,11 @@
 package org.example;
 
+import io.grpc.Deadline;
 import io.grpc.stub.StreamObserver;
 
-import java.util.List;
+import java.io.IOException;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 
 class LearnerAgent extends LearnerServiceGrpc.LearnerServiceImplBase {
@@ -11,39 +14,67 @@ class LearnerAgent extends LearnerServiceGrpc.LearnerServiceImplBase {
     }
 
     private final List<AcceptorServiceGrpc.AcceptorServiceBlockingStub> stubs;
-    private int acceptedProposalNumber = 0;
-    private String acceptedValue = "";
+
+    public List<ChosenEntry> learn() {
+        System.out.println("LEARNER AGENT: I have been asked to learn the whole sequence.");
+        HashMap<Integer, Set<String>> acceptedValues = new HashMap<>();
+        final HashMap<Integer, String> chosenValues = new HashMap<>();
+        InformRequest informRequest = InformRequest.newBuilder().build();
+
+        for (AcceptorServiceGrpc.AcceptorServiceBlockingStub stub : stubs) {
+            try {
+                InformResponse informResponse = stub.inform(informRequest);
+                for (InformResponse.Pair pair : informResponse.getAcceptedValuesList()) {
+                    if (acceptedValues.containsKey(pair.getSequenceNumber())) {
+                        boolean distinct = acceptedValues.get(pair.getSequenceNumber()).add(pair.getAcceptedValue());
+                        if (!distinct)
+                            chosenValues.put(pair.getSequenceNumber(), pair.getAcceptedValue());
+                    } else {
+                        HashSet<String> newHashSet = new HashSet<>();
+                        newHashSet.add(pair.getAcceptedValue());
+                        acceptedValues.put(pair.getSequenceNumber(), newHashSet);
+                    }
+                }
+            } catch (Exception e) {
+                System.out.println("LEARNER AGENT: Seems like " + stub.getChannel().authority() + " is down. (" + e.getMessage() + ")");
+            }
+        }
+
+        System.out.println("LEARNER AGENT: Currently there are " + chosenValues.size() + " chosen commands.");
+
+        return chosenValues.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .map(entry -> new ChosenEntry(entry.getKey(), entry.getValue()))
+                .toList();
+    }
+
+
+    HashMap<Integer, HashMap<Integer, String>> acceptedValues = new HashMap<>();
+    HashMap<Integer, String> chosenValues = new HashMap<>();
 
     @Override
-    public void learn(ExternalLearnRequest request, StreamObserver<LearnResponse> responseObserver) {
-        System.out.println("LEARNER AGENT: I have been asked to learn weather values is chosen.");
+    public void internalLearn(InternalLearnRequest request, StreamObserver<InternalLearnResponse> responseObserver) {
+        if (acceptedValues.containsKey(request.getSequenceNumber()))
+            acceptedValues.get(request.getSequenceNumber()).put(request.getReplicaNumber(), request.getAcceptedValue());
+        else {
+            HashMap<Integer, String> hashMap = new HashMap<>();
+            hashMap.put(request.getReplicaNumber(), request.getAcceptedValue());
+            acceptedValues.put(request.getSequenceNumber(), hashMap);
+        }
+        Collection<String> acceptedValuesForSeqNum = acceptedValues.get(request.getSequenceNumber()).values();
+        HashSet<String> hashSet = new HashSet<>();
 
-        LearnResponse.Status status = LearnResponse.Status.DONT_KNOW;
-        for (AcceptorServiceGrpc.AcceptorServiceBlockingStub stub : stubs) {
-            InformResponse informResponse = stub.inform(InformRequest.newBuilder().build());
-
-            if (informResponse.getStatus().equals(InformResponse.Status.DONE)) {
-                acceptedProposalNumber = informResponse.getAcceptedProposalNumber();
-                acceptedValue = informResponse.getAcceptedValue();
-                status = LearnResponse.Status.CHOSEN;
-                System.out.println("LEARNER AGENT: I learned that the value \"" +acceptedValue+ "\" is chosen with proposal number of: " + acceptedProposalNumber);
+        String chosenValue;
+        for (String value : acceptedValuesForSeqNum) {
+            if(!hashSet.add(value)) {
+                chosenValue = value;
+                System.out.println("LEARNER AGENT: I've learned from acceptor requests that the value \"" + chosenValue + "\" is chosen for sequence number " + request.getSequenceNumber());
+                chosenValues.put(request.getSequenceNumber(), chosenValue);
                 break;
             }
         }
-        LearnResponse learnResponse = LearnResponse.newBuilder().setStatus(status).setAcceptedValue(acceptedValue).build();
-        responseObserver.onNext(learnResponse);
-        responseObserver.onCompleted();
-    }
 
-    @Override
-    public void internalLearn(InternalLearnRequest request, StreamObserver<LearnResponse> responseObserver) {
-        this.acceptedValue = request.getAcceptedValue();
-        this.acceptedProposalNumber = request.getAcceptedProposalNumber();
-        System.out.println("LEARNER AGENT: I have learn from an acceptor request the value \"" +acceptedValue+ "\" with number " + acceptedProposalNumber);
-        LearnResponse learnResponse = LearnResponse.newBuilder()
-                .setStatus(LearnResponse.Status.CHOSEN)
-                .setAcceptedValue(acceptedValue).build();
-        responseObserver.onNext(learnResponse);
+        responseObserver.onNext(InternalLearnResponse.newBuilder().build());
         responseObserver.onCompleted();
     }
 }

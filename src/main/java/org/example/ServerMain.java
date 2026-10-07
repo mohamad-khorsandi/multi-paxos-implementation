@@ -9,10 +9,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 
-public class Main {
+public class ServerMain {
+    static ProposerAgent proposerAgent;
+    static AcceptorAgent acceptorAgent;
+    static LearnerAgent learnerAgent;
+    static SequenceManagerAgent sequenceManagerAgent;
+
     public static void main(String[] args) throws IOException, InterruptedException {
         int selfPortNumber = Integer.parseInt(args[0]);
-        int proposalOffset = Integer.parseInt(args[1]);
+        int replicaNumber = Integer.parseInt(args[1]);
         List<Integer> peerPortNumbers = List.of(Integer.parseInt(args[2]), Integer.parseInt(args[3]), Integer.parseInt(args[4]));
 
         ArrayList<AcceptorServiceGrpc.AcceptorServiceBlockingStub> acceptorStubs = new ArrayList<>();
@@ -23,10 +28,15 @@ public class Main {
             learnerStubs.add(LearnerServiceGrpc.newBlockingStub(channel));
         }
 
+        proposerAgent = new ProposerAgent(acceptorStubs, replicaNumber);
+        acceptorAgent = new AcceptorAgent(learnerStubs, replicaNumber);
+        learnerAgent = new LearnerAgent(acceptorStubs);
+        sequenceManagerAgent = new SequenceManagerAgent();
+
         Server server = ServerBuilder.forPort(selfPortNumber)
-                .addService(new AcceptorAgent(learnerStubs, selfPortNumber))
-                .addService(new LearnerAgent(acceptorStubs))
-                .addService(new ProposerAgent(proposalOffset, acceptorStubs))
+                .addService(sequenceManagerAgent)
+                .addService(acceptorAgent)
+                .addService(learnerAgent)
                 .addService(ProtoReflectionService.newInstance())
                 .build()
                 .start();
